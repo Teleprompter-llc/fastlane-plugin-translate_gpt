@@ -1,6 +1,7 @@
 require 'fastlane_core/ui/ui'
 require 'loco_strings/parsers/xcstrings_file'
 require 'json'
+require 'nokogiri'
 # rubocop:disable all
 
 module Fastlane
@@ -53,9 +54,36 @@ module Fastlane
       end
 
       # Get the strings from a file
+      def prepare_android_strings() 
+        @input_hash = {}
+        doc = File.open(@params[:source_file]) { |f| Nokogiri::XML(f) }
+        doc.xpath('//resources/string').each do |string|
+          key = string['name']
+          value = string.content
+          comment = string['comment'] || string['translatable'] || nil
+          @input_hash[key] = LocoStrings::LocoString.new(key, value, comment)
+        end
+
+        @output_hash = {}
+        if File.exist?(@params[:target_file])
+          doc = File.open(@params[:target_file]) { |f| Nokogiri::XML(f) }
+          doc.xpath('//resources/string').each do |string|
+            key = string['name']
+            value = string.content
+            comment = string['comment'] || string['translatable'] || nil
+            @output_hash[key] = LocoStrings::LocoString.new(key, value, comment)
+          end
+        end
+
+        @to_translate = filter_translated(@params[:skip_translated], @input_hash, @output_hash)
+      end
+
       def prepare_hashes() 
-        if File.extname(@params[:source_file]) == ".xcstrings"
+        case File.extname(@params[:source_file])
+        when ".xcstrings"
           prepare_xcstrings() 
+        when ".xml"
+          prepare_android_strings()
         else
           prepare_strings() 
         end
@@ -291,14 +319,20 @@ module Fastlane
         target_string = Colorizer::colorize(@params[:target_file], :white)
         UI.message "Writing #{number_of_strings} strings to #{target_string}..."
 
-        if @xcfile.nil?
-          file = LocoStrings.load(@params[:target_file])
-          file.read
-          @output_hash.each do |key, value|
-            file.update(key, value.value, value.comment)
+        case File.extname(@params[:target_file])
+        when ".xml"
+          builder = Nokogiri::XML::Builder.new(encoding: 'UTF-8') do |xml|
+            xml.resources {
+              @output_hash.each do |key, value|
+                attrs = { name: key }
+                attrs[:comment] = value.comment if value.comment
+                attrs[:translatable] = value.comment if value.comment == "false" || value.comment == "true"
+                xml.string(value.value, attrs)
+              end
+            }
           end
-          file.write
-        else
+          File.write(@params[:target_file], builder.to_xml(indent: 2))
+        when ".xcstrings"
           @xcfile.update_file_path(@params[:target_file])
           @output_hash.each do |key, value|
             if value.is_a? LocoStrings::LocoString
@@ -310,6 +344,13 @@ module Fastlane
             end
           end
           @xcfile.write
+        else
+          file = LocoStrings.load(@params[:target_file])
+          file.read
+          @output_hash.each do |key, value|
+            file.update(key, value.value, value.comment)
+          end
+          file.write
         end
       end
 

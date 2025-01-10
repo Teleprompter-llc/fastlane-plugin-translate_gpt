@@ -85,8 +85,7 @@ module Fastlane
             verify_block: proc do |value|
               UI.user_error!("Invalid file path: #{value}") unless File.exist?(value)
               extension = File.extname(value)
-              available_extensions = [".strings", ".xcstrings"]
-              UI.user_error!("Translation file must have any of these extensions: #{available_extensions}") unless available_extensions.include? extension
+              UI.user_error!("Translation file must have any of these extensions: #{TranslateGptAction.available_extensions}") unless TranslateGptAction.available_extensions.include? extension
             end
           ),
           FastlaneCore::ConfigItem.new(
@@ -96,8 +95,7 @@ module Fastlane
             verify_block: proc do |value|
               UI.user_error!("Invalid file path: #{value}") unless File.exist?(value)
               extension = File.extname(value)
-              available_extensions = [".strings", ".xcstrings"]
-              UI.user_error!("Translation file must have any of these extensions: #{available_extensions}") unless available_extensions.include? extension
+              UI.user_error!("Translation file must have any of these extensions: #{TranslateGptAction.available_extensions}") unless TranslateGptAction.available_extensions.include? extension
             end
           ),    
           FastlaneCore::ConfigItem.new(
@@ -135,8 +133,12 @@ module Fastlane
       end
 
       def self.is_supported?(platform)
-        [:ios, :mac].include?(platform)
+        [:ios, :mac, :android].include?(platform)
       end      
+
+      def self.available_extensions
+        [".strings", ".xcstrings", ".xml"]
+      end
     end
   end
 end
