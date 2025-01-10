@@ -57,6 +57,7 @@ module Fastlane
       def prepare_android_strings() 
         @input_hash = {}
         doc = File.open(@params[:source_file]) { |f| Nokogiri::XML(f) }
+        # Parse regular strings
         doc.xpath('//resources/string').each do |string|
           key = string['name']
           value = string.content
@@ -64,14 +65,46 @@ module Fastlane
           @input_hash[key] = LocoStrings::LocoString.new(key, value, comment)
         end
 
+        # Parse plural strings
+        doc.xpath('//resources/plurals').each do |plurals|
+          key = plurals['name']
+          strings = {}
+          comment = plurals['comment'] || nil
+          
+          plurals.xpath('item').each do |item|
+            quantity = item['quantity']
+            value = item.content
+            strings[quantity] = LocoStrings::LocoString.new(quantity, value, comment)
+          end
+          
+          @input_hash[key] = LocoStrings::LocoVariantions.new(key, strings, comment)
+        end
+
         @output_hash = {}
         if File.exist?(@params[:target_file])
           doc = File.open(@params[:target_file]) { |f| Nokogiri::XML(f) }
+          
+          # Parse existing regular strings
           doc.xpath('//resources/string').each do |string|
             key = string['name']
             value = string.content
             comment = string['comment'] || string['translatable'] || nil
             @output_hash[key] = LocoStrings::LocoString.new(key, value, comment)
+          end
+
+          # Parse existing plural strings
+          doc.xpath('//resources/plurals').each do |plurals|
+            key = plurals['name']
+            strings = {}
+            comment = plurals['comment'] || nil
+            
+            plurals.xpath('item').each do |item|
+              quantity = item['quantity']
+              value = item.content
+              strings[quantity] = LocoStrings::LocoString.new(quantity, value, comment)
+            end
+            
+            @output_hash[key] = LocoStrings::LocoVariantions.new(key, strings, comment)
           end
         end
 
@@ -324,10 +357,20 @@ module Fastlane
           builder = Nokogiri::XML::Builder.new(encoding: 'UTF-8') do |xml|
             xml.resources {
               @output_hash.each do |key, value|
-                attrs = { name: key }
-                attrs[:comment] = value.comment if value.comment
-                attrs[:translatable] = value.comment if value.comment == "false" || value.comment == "true"
-                xml.string(value.value, attrs)
+                if value.is_a? LocoStrings::LocoString
+                  attrs = { name: key }
+                  attrs[:comment] = value.comment if value.comment
+                  attrs[:translatable] = value.comment if value.comment == "false" || value.comment == "true"
+                  xml.string(value.value, attrs)
+                elsif value.is_a? LocoStrings::LocoVariantions
+                  attrs = { name: key }
+                  attrs[:comment] = value.comment if value.comment
+                  xml.plurals(attrs) {
+                    value.strings.each do |quantity, string|
+                      xml.item(string.value, quantity: quantity)
+                    end
+                  }
+                end
               end
             }
           end
