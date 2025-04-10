@@ -61,7 +61,11 @@ module Fastlane
         doc.xpath('//resources/string').each do |string|
           key = string['name']
           value = string.content
-          comment = string['comment'] || string['translatable'] || nil
+          # Store the actual translatable attribute value to properly handle the attribute
+          translatable = string['translatable']
+          comment = string['comment'] || nil
+          # Use translatable as comment if it exists
+          comment = translatable if translatable
           @input_hash[key] = LocoStrings::LocoString.new(key, value, comment)
         end
 
@@ -361,13 +365,15 @@ module Fastlane
                   attrs = { name: key }
                   attrs[:comment] = value.comment if value.comment
                   attrs[:translatable] = value.comment if value.comment == "false" || value.comment == "true"
-                  xml.string(value.value, attrs)
+                  escaped_value = value.value.to_s.gsub("'", "\\'") if value.value
+                  xml.string(escaped_value, attrs)
                 elsif value.is_a? LocoStrings::LocoVariantions
                   attrs = { name: key }
                   attrs[:comment] = value.comment if value.comment
                   xml.plurals(attrs) {
                     value.strings.each do |quantity, string|
-                      xml.item(string.value, quantity: quantity)
+                      escaped_value = string.value.to_s.gsub("'", "\\'") if string.value
+                      xml.item(escaped_value, quantity: quantity)
                     end
                   }
                 end
@@ -417,7 +423,7 @@ module Fastlane
 
       def filter_translated(need_to_skip, base, target) 
         if need_to_skip
-          return base.reject { |k, v| target[k] }
+          return base.reject { |k, v| target[k] || (v.is_a?(LocoStrings::LocoString) && v.comment == "false") }
         else 
           return base
         end
