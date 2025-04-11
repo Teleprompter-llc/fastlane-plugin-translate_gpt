@@ -365,23 +365,14 @@ module Fastlane
                   attrs = { name: key }
                   attrs[:comment] = value.comment if value.comment
                   attrs[:translatable] = value.comment if value.comment == "false" || value.comment == "true"
-                  # Properly handle apostrophes in Android strings without double-escaping already escaped ones
-                  escaped_value = nil
-                  if value.value
-                    # First handle any already escaped quotes, then escape remaining unescaped quotes
-                    escaped_value = value.value.to_s.gsub(/([^\\])'|^'/) { "#{$1}\\" + "'" }
-                  end
+                  escaped_value = value.value
                   xml.string(escaped_value, attrs)
                 elsif value.is_a? LocoStrings::LocoVariantions
                   attrs = { name: key }
                   attrs[:comment] = value.comment if value.comment
                   xml.plurals(attrs) {
                     value.strings.each do |quantity, string|
-                      escaped_value = nil
-                      if string.value
-                        # First handle any already escaped quotes, then escape remaining unescaped quotes
-                        escaped_value = string.value.to_s.gsub(/([^\\])'|^'/) { "#{$1}\\" + "'" }
-                      end
+                      escaped_value = string.value
                       xml.item(escaped_value, quantity: quantity)
                     end
                   }
