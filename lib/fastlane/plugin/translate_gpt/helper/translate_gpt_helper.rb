@@ -358,6 +358,21 @@ module Fastlane
 
         case File.extname(@params[:target_file])
         when ".xml"
+          # Load existing translations to preserve them
+          existing_translations = {}
+          if File.exist?(@params[:target_file])
+            doc = File.open(@params[:target_file]) { |f| Nokogiri::XML(f) }
+            doc.xpath('//resources/string').each do |string|
+              existing_translations[string['name']] = string.content
+            end
+            doc.xpath('//resources/plurals').each do |plurals|
+              key = plurals['name']
+              plurals.xpath('item').each do |item|
+                existing_translations["#{key}_#{item['quantity']}"] = item.content
+              end
+            end
+          end
+          
           builder = Nokogiri::XML::Builder.new(encoding: 'UTF-8') do |xml|
             xml.resources {
               @output_hash.each do |key, value|
@@ -365,14 +380,33 @@ module Fastlane
                   attrs = { name: key }
                   attrs[:comment] = value.comment if value.comment
                   attrs[:translatable] = value.comment if value.comment == "false" || value.comment == "true"
-                  escaped_value = value.value
+                  
+                  # Use the existing value if it exists and wasn't in @to_translate
+                  if existing_translations.key?(key) && !@to_translate.key?(key)
+                    escaped_value = existing_translations[key]
+                  else
+                    # For newly translated values, properly escape single quotes
+                    escaped_value = value.value
+                    escaped_value = escaped_value.to_s.gsub("'", "\\'") if escaped_value && !escaped_value.include?("\\'")
+                  end
+                  
                   xml.string(escaped_value, attrs)
                 elsif value.is_a? LocoStrings::LocoVariantions
                   attrs = { name: key }
                   attrs[:comment] = value.comment if value.comment
                   xml.plurals(attrs) {
                     value.strings.each do |quantity, string|
-                      escaped_value = string.value
+                      composite_key = "#{key}_#{quantity}"
+                      
+                      # Use the existing value if it exists and wasn't in @to_translate
+                      if existing_translations.key?(composite_key) && !(@to_translate.key?(key) && @to_translate[key].strings.key?(quantity))
+                        escaped_value = existing_translations[composite_key]
+                      else
+                        # For newly translated values, properly escape single quotes
+                        escaped_value = string.value
+                        escaped_value = escaped_value.to_s.gsub("'", "\\'") if escaped_value && !escaped_value.include?("\\'")
+                      end
+                      
                       xml.item(escaped_value, quantity: quantity)
                     end
                   }
