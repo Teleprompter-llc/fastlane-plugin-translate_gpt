@@ -91,9 +91,20 @@ module Fastlane
           FastlaneCore::ConfigItem.new(
             key: :target_file,
             env_name: "GPT_TARGET_FILE",
-            description: "Path to the translation file to update",
+            description: "Path to the translation file to update or create",
             verify_block: proc do |value|
-              UI.user_error!("Invalid file path: #{value}") unless File.exist?(value)
+              # Check if parent directory exists or create it
+              dirname = File.dirname(value)
+              unless File.directory?(dirname)
+                begin
+                  FileUtils.mkdir_p(dirname)
+                  UI.message("Created directory: #{dirname}")
+                rescue => e
+                  UI.user_error!("Could not create directory '#{dirname}': #{e.message}")
+                end
+              end
+              
+              # Validate the file extension
               extension = File.extname(value)
               UI.user_error!("Translation file must have any of these extensions: #{TranslateGptAction.available_extensions}") unless TranslateGptAction.available_extensions.include? extension
             end
