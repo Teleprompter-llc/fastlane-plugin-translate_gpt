@@ -8,6 +8,16 @@ module Fastlane
     class TranslateGptAction < Action
       def self.run(params)
         helper = Helper::TranslateGptHelper.new(params)
+        
+        # Check for values-en for English translations
+        if params[:target_language] == "en" && 
+           params[:target_file] && 
+           File.extname(params[:target_file]) == ".xml" && 
+           File.dirname(params[:target_file]).include?("values-en")
+          UI.important("Skipping creation of 'values-en' for English translations since they belong in the default 'values' directory.")
+          return
+        end
+        
         helper.prepare_hashes()
         bunch_size = params[:bunch_size] 
         helper.log_input(bunch_size)
@@ -93,8 +103,14 @@ module Fastlane
             env_name: "GPT_TARGET_FILE",
             description: "Path to the translation file to update or create",
             verify_block: proc do |value|
-              # Check if parent directory exists or create it
+              # Validate the file extension
+              extension = File.extname(value)
+              UI.user_error!("Translation file must have any of these extensions: #{TranslateGptAction.available_extensions}") unless TranslateGptAction.available_extensions.include? extension
+              
+              # Validate Android resource directories
               dirname = File.dirname(value)
+              
+              # Check if parent directory exists or create it
               unless File.directory?(dirname)
                 begin
                   FileUtils.mkdir_p(dirname)
@@ -103,10 +119,6 @@ module Fastlane
                   UI.user_error!("Could not create directory '#{dirname}': #{e.message}")
                 end
               end
-              
-              # Validate the file extension
-              extension = File.extname(value)
-              UI.user_error!("Translation file must have any of these extensions: #{TranslateGptAction.available_extensions}") unless TranslateGptAction.available_extensions.include? extension
             end
           ),    
           FastlaneCore::ConfigItem.new(
