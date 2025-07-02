@@ -217,7 +217,9 @@ module Fastlane
       def prepare_bunch_prompt(strings)
         prompt = "I want you to act as a translator for a mobile application strings. " + \
             "Try to keep length of the translated text. " + \
-            "You need to response with a JSON only with the translation and nothing else until I say to stop it. "
+            "You need to response with a JSON only with the translation and nothing else until I say to stop it. " + \
+            "For each object, replace 'string_to_translate' with 'translated' and 'strings_to_translate' with 'strings_translated'. " + \
+            "IMPORTANT: Do not repeat or duplicate any part of the translation. Provide clean, single translations only. "
         if @params[:context] && !@params[:context].empty?
           prompt += "This app is #{@params[:context]}. "
         end
@@ -262,6 +264,33 @@ module Fastlane
         uppercased_string = input_string.upcase
         escaped_string = uppercased_string.gsub(/[^0-9a-zA-Z]+/, '_')
         return escaped_string
+      end
+
+      # Extract JSON from GPT response, handling strings with square brackets
+      def extract_json_from_response(response_text)
+        # First try to extract JSON between triple quotes
+        if match = response_text.match(/'''(.*?)'''/m)
+          return match[1].strip
+        end
+        
+        # Fallback: extract JSON array using bracket counting
+        start_index = response_text.index('[')
+        return nil unless start_index
+        
+        bracket_count = 0
+        end_index = start_index
+        
+        response_text[start_index..-1].each_char.with_index(start_index) do |char, index|
+          bracket_count += 1 if char == '['
+          bracket_count -= 1 if char == ']'
+          
+          if bracket_count == 0
+            end_index = index
+            break
+          end
+        end
+        
+        return response_text[start_index..end_index]
       end
 
       # Request a translation from the GPT API
@@ -312,21 +341,39 @@ module Fastlane
           UI.error "#{index_log} Error translating: #{error}"
         else
           target_string = response.dig("choices", 0, "message", "content")
-          json_string = target_string[/\[[^\[\]]*\]/m]
+          json_string = extract_json_from_response(target_string)
+          
+          unless json_string
+            UI.error "#{index_log} Could not extract JSON from response"
+            UI.error "#{index_log} Response: \"#{target_string}\""
+            return
+          end
+          
           begin
             json_hash = JSON.parse(json_string)
           rescue => error
             UI.error "#{index_log} Error parsing JSON: #{error}"
-            UI.error "#{index_log} JSON: \"#{json_string}\""
+            UI.error "#{index_log} Extracted JSON: \"#{json_string}\""
+            UI.error "#{index_log} Full response: \"#{target_string}\""
             return
           end
           keys_to_translate = json_hash.map { |string_hash| string_hash["key"] }
           json_hash.each do |string_hash|
             key = string_hash["key"]
             context = string_hash["context"]
-            string_hash.delete("key")
-            string_hash.delete("context")
-            translated_string = string_hash.values.first
+            
+            # Look for the translated content in expected field names
+            translated_string = string_hash["translated"] || 
+                               string_hash["translation"] || 
+                               string_hash["string_translated"] ||
+                               string_hash["strings_translated"] ||
+                               string_hash.values.find { |v| v != key && v != context }
+            
+            # Debug logging to see what fields are actually in the response
+            if translated_string.nil? || translated_string.to_s.empty?
+              UI.important "#{index_log} No translated content found for #{key}. Available fields: #{string_hash.keys.join(', ')}"
+              next
+            end
             return unless key && !key.empty? 
             real_key = @keys_associations[key]
             if translated_string.is_a? Hash
@@ -337,6 +384,21 @@ module Fastlane
               end
               string = LocoStrings::LocoVariantions.new(real_key, strings, context)
             elsif translated_string && !translated_string.empty?
+              # Check for potential duplication in translation
+              if translated_string.length > 200
+                UI.important "#{index_log} Long translation detected for #{real_key} (#{translated_string.length} chars)"
+                # Look for repeated patterns that might indicate duplication
+                words = translated_string.split(' ')
+                if words.length > 20
+                  mid_point = words.length / 2
+                  first_half = words[0...mid_point].join(' ')
+                  second_half = words[mid_point..-1].join(' ')
+                  if first_half.length > 50 && second_half.include?(first_half[0...50])
+                    UI.error "#{index_log} Possible text duplication detected in translation for #{real_key}"
+                    UI.error "#{index_log} Translation: #{translated_string}"
+                  end
+                end
+              end
               UI.message "#{index_log} Translating #{real_key} - #{translated_string}"
               string = LocoStrings::LocoString.new(real_key, translated_string, context)
             end
